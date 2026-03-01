@@ -20,8 +20,14 @@ class RakkRGBController:
         self.find_device()
 
     def find_device(self):
-        """Find and connect to the Rakk Ilis keyboard."""
-        # Enumerate all HID devices
+        """Find and connect to the Rakk Ilis keyboard.
+
+        Some Rakk boards expose multiple HID interfaces; the RGB controller
+        is usually on the keyboard interface (ends with "\\KBD" in the path).
+        If we just open by vendor/product the wrong endpoint may be chosen and
+        writes will silently be ignored, leaving the backlight dark.
+        """
+        # Enumerate all HID devices with our VID/PID
         devices = hid.enumerate(self.VENDOR_ID, self.PRODUCT_ID)
 
         if not devices:
@@ -31,18 +37,37 @@ class RakkRGBController:
                 f"Product ID: {hex(self.PRODUCT_ID)}"
             )
 
-        # Try to connect to the first matching device
-        device_info = devices[0]
-        
+        # Prefer the device whose path contains "kbd" (keyboard interface)
+        device_info = None
+        for d in devices:
+            path = d.get("path", "").lower()
+            if "kbd" in path:
+                device_info = d
+                break
+
+        # fallback to first entry if nothing obvious
+        if device_info is None:
+            device_info = devices[0]
+
         try:
             self.device = hid.device()
-            self.device.open(self.VENDOR_ID, self.PRODUCT_ID)
-            
+
+            # open using the explicit path so we don't accidentally hit a
+            # non-RGB interface when multiple handlers exist.
+            if device_info.get("path"):
+                self.device.open_path(device_info["path"])
+            else:
+                self.device.open(self.VENDOR_ID, self.PRODUCT_ID)
+
             # Set non-blocking mode for better responsiveness
             self.device.set_nonblocking(1)
-            
+
         except OSError as e:
             raise RuntimeError(f"Failed to open HID device: {e}")
+
+        print(f"✓ Rakk Ilis keyboard connected")
+        print(f"  Device: {device_info.get('product_string', 'Unknown')}")
+        print(f"  Path: {device_info.get('path', 'Unknown')}")
 
         print(f"✓ Rakk Ilis keyboard connected")
         print(f"  Device: {device_info.get('product_string', 'Unknown')}")
@@ -67,9 +92,17 @@ class RakkRGBController:
         # Format: [header] [mode] [frame/color data]
         # This command sets static color
         try:
-            # Try common RGB command structure
+            # Try common RGB command structure. Some SONiX boards expect a
+            # leading report ID (0x00) while others do not; try both.
             command = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
-            self.device.write(bytes(command))
+            written = self.device.write(bytes(command))
+            if written == 0:
+                # maybe needs an extra 0 prefix
+                command = [0x00] + command
+                written = self.device.write(bytes(command))
+            if written == 0:
+                print("Warning: HID write returned 0 bytes written; the device
+may not support this report format")
         except OSError as e:
             print(f"Warning: HID error sending color - {e}")
 

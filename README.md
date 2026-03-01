@@ -198,6 +198,20 @@ Windows handles HID devices better than Linux - try:
 
 The official Rakk software might be blocking the HID interface. Try:
 1. Closing any official Rakk RGB control software
+
+If the keyboard connects but the LEDs remain dark:
+
+- **Multiple HID interfaces**: Some boards expose a generic SONiX vendor interface plus a
+  separate keyboard interface (paths end with `\\KBD`).  The sync script will now
+  automatically pick the `KBD` path, but you can double-check by running
+  `python find_keyboard.py` and verifying the `Path:` shown for your device.
+- **Report format mismatch**: The code sends a simple eight‑byte packet and retries
+  with a leading `0x00` byte.  If neither works you can experiment manually:
+  open a Python REPL and use `hid.device().write(...)` or
+  `hid.device().send_feature_report(...)` with different byte sequences until you
+  see activity.  The debug output prints a warning if zero bytes are written.
+
+
 2. Unplugging the keyboard, waiting 3 seconds, and plugging it back in
 3. Restarting the Python application
 
