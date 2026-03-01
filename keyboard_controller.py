@@ -127,20 +127,24 @@ class RakkRGBController:
             try:
                 written = self.device.write(data)
                 print(f"DEBUG: write attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={written}")
-                if written:
+                    # hidapi returns -1 on error, 0 when nothing written, positive bytes
+                    if written is not None and written > 0:
                     return
-            except Exception as e:
-                print(f"DEBUG: write attempt {idx} raised {e}")
+                    elif written == -1:
+                        print(f"DEBUG: write returned -1 (error) on attempt {idx}")
+                except Exception as e:
+                    print(f"DEBUG: write attempt {idx} raised {e}")
 
-            # try feature report as alternative path
-            try:
-                fed = self.device.send_feature_report(data)
-                print(f"DEBUG: feature attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={fed}")
-                if fed:
-                    return
-            except Exception as e:
-                print(f"DEBUG: feature attempt {idx} raised {e}")
-
+                # try feature report as alternative path
+                try:
+                    fed = self.device.send_feature_report(data)
+                    print(f"DEBUG: feature attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={fed}")
+                    if fed is not None and fed > 0:
+                        return
+                    elif fed == -1:
+                        print(f"DEBUG: feature report returned -1 (error) on attempt {idx}")
+                except Exception as e:
+                    print(f"DEBUG: feature attempt {idx} raised {e}")
         # if we reach here nothing seemed to work
         print("Warning: all color write/feature attempts returned 0 or failed")
 
