@@ -100,6 +100,12 @@ def test_keyboard_colors(keyboard):
 
         print("\nKeyboard color test completed!")
         keyboard.close()
+
+        # if the keyboard never lit up, offer probe instructions
+        print("\nIf the LEDs remained dark, try running the probe routine:")
+        print("  >>> from keyboard_controller import RakkRGBController")
+        print("  >>> k = RakkRGBController()")
+        print("  >>> k.probe_color()  # CTRL+C when you see output")
         return True
 
     except Exception as e:

@@ -37,37 +37,46 @@ class RakkRGBController:
                 f"Product ID: {hex(self.PRODUCT_ID)}"
             )
 
-        # Prefer the device whose path contains "kbd" (keyboard interface)
+        # Try each HID interface until one accepts a color write.  This
+        # heuristics helps when the correct interface isn't the keyboard
+        # endpoint (many SONiX boards expose several, e.g. Col02/Col03 ...).
         device_info = None
         for d in devices:
-            path = d.get("path", "").lower()
-            if "kbd" in path:
-                device_info = d
-                break
+            try:
+                dev = hid.device()
+                if d.get("path"):
+                    dev.open_path(d["path"])
+                else:
+                    dev.open(self.VENDOR_ID, self.PRODUCT_ID)
+                dev.set_nonblocking(1)
 
-        # fallback to first entry if nothing obvious
+                # perform a harmless write (black).  If the interface rejects
+                # it or returns 0 bytes written we assume it's not the RGB
+                # endpoint.
+                try:
+                    ret = dev.write(bytes([0x08, 0x01, 0x01, 0, 0, 0, 0, 0]))
+                except Exception:
+                    ret = 0
+
+                if ret:
+                    device_info = d
+                    self.device = dev
+                    break
+                else:
+                    dev.close()
+            except Exception:
+                # ignore and try next
+                continue
+
+        # if probing failed, fall back to the first device (previous logic)
         if device_info is None:
             device_info = devices[0]
-
-        try:
             self.device = hid.device()
-
-            # open using the explicit path so we don't accidentally hit a
-            # non-RGB interface when multiple handlers exist.
             if device_info.get("path"):
                 self.device.open_path(device_info["path"])
             else:
                 self.device.open(self.VENDOR_ID, self.PRODUCT_ID)
-
-            # Set non-blocking mode for better responsiveness
             self.device.set_nonblocking(1)
-
-        except OSError as e:
-            raise RuntimeError(f"Failed to open HID device: {e}")
-
-        print(f"✓ Rakk Ilis keyboard connected")
-        print(f"  Device: {device_info.get('product_string', 'Unknown')}")
-        print(f"  Path: {device_info.get('path', 'Unknown')}")
 
         print(f"✓ Rakk Ilis keyboard connected")
         print(f"  Device: {device_info.get('product_string', 'Unknown')}")
@@ -76,7 +85,7 @@ class RakkRGBController:
     def set_color(self, r, g, b):
         """
         Set the RGB color on the keyboard.
-        
+
         Args:
             r, g, b: Color values 0-255
         """
@@ -88,23 +97,35 @@ class RakkRGBController:
         g = max(0, min(255, g))
         b = max(0, min(255, b))
 
-        # Standard RGB HID control command for mechanical keyboards
-        # Format: [header] [mode] [frame/color data]
-        # This command sets static color
-        try:
-            # Try common RGB command structure. Some SONiX boards expect a
-            # leading report ID (0x00) while others do not; try both.
-            command = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
-            written = self.device.write(bytes(command))
-            if written == 0:
-                # maybe needs an extra 0 prefix
-                command = [0x00] + command
-                written = self.device.write(bytes(command))
-            if written == 0:
-                print("Warning: HID write returned 0 bytes written; the device
-may not support this report format")
-        except OSError as e:
-            print(f"Warning: HID error sending color - {e}")
+        # We'll attempt several known command layouts and log them for debugging.
+        candidates = []
+        base = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
+        candidates.append(base)
+        candidates.append([0x00] + base)
+        candidates.append([0x08, 0x05, 0x01, r, g, b, 0x00, 0x00])
+        candidates.append([0x00, 0x08, 0x05, 0x01, r, g, b, 0x00, 0x00])
+
+        for idx, cmd in enumerate(candidates, 1):
+            data = bytes(cmd)
+            try:
+                written = self.device.write(data)
+                print(f"DEBUG: write attempt {idx} cmd={cmd} returned={written}")
+                if written:
+                    return
+            except Exception as e:
+                print(f"DEBUG: write attempt {idx} raised {e}")
+
+            # try feature report as alternative path
+            try:
+                fed = self.device.send_feature_report(data)
+                print(f"DEBUG: feature attempt {idx} cmd={cmd} returned={fed}")
+                if fed:
+                    return
+            except Exception as e:
+                print(f"DEBUG: feature attempt {idx} raised {e}")
+
+        # if we reach here nothing seemed to work
+        print("Warning: all color write/feature attempts returned 0 or failed")
 
     def set_color_smooth(self, r, g, b, steps=30):
         """
@@ -136,3 +157,28 @@ may not support this report format")
                 self.device.close()
             except:
                 pass
+
+    def probe_color(self):
+        """Try a series of commands while user watches keyboard.
+
+        Useful when the exact HID report format is unknown.  Each attempt
+        will be printed with its contents; press CTRL+C to abort once you
+        see your keyboard respond.
+        """
+        print("Probing color commands; watch the keyboard and interrupt when it lights up...")
+        r, g, b = 255, 0, 0
+        base = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
+        candidates = [base, [0x00] + base,
+                      [0x08, 0x05, 0x01, r, g, b, 0x00, 0x00],
+                      [0x00, 0x08, 0x05, 0x01, r, g, b, 0x00, 0x00]]
+        try:
+            while True:
+                for idx, cmd in enumerate(candidates, 1):
+                    try:
+                        written = self.device.write(bytes(cmd))
+                        print(f"probe {idx}: {cmd} -> {written}")
+                    except Exception as e:
+                        print(f"probe {idx} error: {e}")
+                    time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("Probe stopped")

@@ -206,10 +206,21 @@ If the keyboard connects but the LEDs remain dark:
   automatically pick the `KBD` path, but you can double-check by running
   `python find_keyboard.py` and verifying the `Path:` shown for your device.
 - **Report format mismatch**: The code sends a simple eight‑byte packet and retries
-  with a leading `0x00` byte.  If neither works you can experiment manually:
-  open a Python REPL and use `hid.device().write(...)` or
-  `hid.device().send_feature_report(...)` with different byte sequences until you
-  see activity.  The debug output prints a warning if zero bytes are written.
+  with a leading `0x00` byte.  The controller will also automatically attempt the
+  same packet as a *feature report* in case your board expects that instead of an
+  output report.  If none of these work you can experiment manually or use
+  the built‑in probe function:
+
+    ```python
+    >>> from keyboard_controller import RakkRGBController
+    >>> k = RakkRGBController()
+    >>> k.probe_color()            # blinks red with several command variants
+    ...                           # CTRL+C when the keyboard lights up
+    ```
+
+  The probe log will show each packet it sends.  Once you identify the working
+  sequence you can update `RakkRGBController.set_color` accordingly.
+
 
 
 2. Unplugging the keyboard, waiting 3 seconds, and plugging it back in
