@@ -97,19 +97,36 @@ class RakkRGBController:
         g = max(0, min(255, g))
         b = max(0, min(255, b))
 
-        # We'll attempt several known command layouts and log them for debugging.
+        # Build a list of candidate packets.  We'll try different report IDs
+        # and also pad to the typical 64-byte HID report size, since many SONiX
+        # controllers expect full‑length reports.
         candidates = []
         base = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
+        # no prefix
         candidates.append(base)
+        # common zero prefix
         candidates.append([0x00] + base)
+        # alternate header values seen in some firmwares
         candidates.append([0x08, 0x05, 0x01, r, g, b, 0x00, 0x00])
         candidates.append([0x00, 0x08, 0x05, 0x01, r, g, b, 0x00, 0x00])
+        # try explicit report IDs 1..4
+        for rid in range(1, 5):
+            candidates.append([rid] + base)
+            candidates.append([rid, 0x00] + base)
+
+        # each candidate should also be tried as a 64-byte packet
+        expanded = []
+        for cmd in candidates:
+            expanded.append(cmd)
+            if len(cmd) < 64:
+                expanded.append(cmd + [0] * (64 - len(cmd)))
+        candidates = expanded
 
         for idx, cmd in enumerate(candidates, 1):
             data = bytes(cmd)
             try:
                 written = self.device.write(data)
-                print(f"DEBUG: write attempt {idx} cmd={cmd} returned={written}")
+                print(f"DEBUG: write attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={written}")
                 if written:
                     return
             except Exception as e:
@@ -118,7 +135,7 @@ class RakkRGBController:
             # try feature report as alternative path
             try:
                 fed = self.device.send_feature_report(data)
-                print(f"DEBUG: feature attempt {idx} cmd={cmd} returned={fed}")
+                print(f"DEBUG: feature attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={fed}")
                 if fed:
                     return
             except Exception as e:
@@ -168,17 +185,29 @@ class RakkRGBController:
         print("Probing color commands; watch the keyboard and interrupt when it lights up...")
         r, g, b = 255, 0, 0
         base = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
+        # build a few variants with different report IDs and padding
         candidates = [base, [0x00] + base,
                       [0x08, 0x05, 0x01, r, g, b, 0x00, 0x00],
                       [0x00, 0x08, 0x05, 0x01, r, g, b, 0x00, 0x00]]
+        for rid in range(1, 5):
+            candidates.append([rid] + base)
+            candidates.append([rid, 0x00] + base)
+        # include padded 64‑byte versions
+        padded = []
+        for cmd in candidates:
+            padded.append(cmd)
+            if len(cmd) < 64:
+                padded.append(cmd + [0] * (64 - len(cmd)))
+        candidates = padded
+
         try:
             while True:
                 for idx, cmd in enumerate(candidates, 1):
                     try:
                         written = self.device.write(bytes(cmd))
-                        print(f"probe {idx}: {cmd} -> {written}")
+                        print(f"probe {idx} len={len(cmd)} -> {written}")
                     except Exception as e:
                         print(f"probe {idx} error: {e}")
-                    time.sleep(0.5)
+                    time.sleep(0.1)
         except KeyboardInterrupt:
             print("Probe stopped")
