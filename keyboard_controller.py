@@ -10,8 +10,8 @@ class RakkRGBController:
 
     # USB Vendor ID and Product ID for Rakk Ilis
     # These are common IDs - may need adjustment based on your specific device
-    VENDOR_ID = 0x3151  # Rakk vendor ID
-    PRODUCT_ID = 0x4154  # Rakk Ilis product ID (example)
+    VENDOR_ID = 0x0c45  # SONiX (Rakk Ilis uses SONiX controller)
+    PRODUCT_ID = 0x8006  # Rakk Ilis product ID
 
     def __init__(self):
         """Initialize the RGB controller and find the keyboard."""
