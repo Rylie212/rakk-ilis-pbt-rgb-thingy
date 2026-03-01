@@ -1,5 +1,5 @@
-Pillow==10.1.0
-mss==9.0.1
-hidapi==0.14.0
-numpy==1.24.0
-colorsys==1.0
+Pillow>=11.0.0
+mss>=9.0.1
+hidapi>=0.15.0
+numpy>=1.26.0
+

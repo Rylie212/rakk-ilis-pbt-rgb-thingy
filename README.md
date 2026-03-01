@@ -16,7 +16,7 @@ A real-time RGB controller for the Rakk Ilis mechanical keyboard that samples yo
 ## Requirements
 
 - **Rakk Ilis PBT Mechanical Keyboard**
-- **Linux** (Ubuntu/Debian tested)
+- **Linux** (Ubuntu/Debian not tested)
 - **Python 3.7+**
 - USB permissions for HID devices
 
