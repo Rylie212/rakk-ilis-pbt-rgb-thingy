@@ -221,6 +221,27 @@ If the keyboard connects but the LEDs remain dark:
   The probe log will show each packet it sends.  Once you identify the working
   sequence you can update `RakkRGBController.set_color` accordingly.
 
+*If none of the HID probes ever succeed, the keyboard is almost certainly
+using a vendor‑specific USB control transfer instead.*  In that case:
+
+1. Use the supplied `usb_probe.py` script to brute‑force control transfers
+   (it requires `pyusb`, now included in `requirements.txt`).
+
+   ```bash
+   python usb_probe.py
+   ```
+
+   Watch the LEDs while the script runs; it will report any successful
+   control request.
+
+2. Alternatively, capture traffic from the official Rakk RGB application
+   using USBPcap/Wireshark (Windows) or `usbmon` (Linux) and inspect the
+   vendor requests.  You can then replicate the same transfer in Python
+   using `dev.ctrl_transfer(...)` (see `RakkRGBController.probe_control_transfers`).
+
+These techniques let you "reverse‑engineer" the protocol used by the
+official software without having to disassemble binaries yourself.
+
 
 
 2. Unplugging the keyboard, waiting 3 seconds, and plugging it back in

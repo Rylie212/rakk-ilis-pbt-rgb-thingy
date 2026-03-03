@@ -29,6 +29,9 @@ class RakkRGBController:
         """
         # Enumerate all HID devices with our VID/PID
         devices = hid.enumerate(self.VENDOR_ID, self.PRODUCT_ID)
+        print(f"DEBUG: hid.enumerate returned {len(devices)} devices")
+        for d in devices:
+            print("  ->", d)
 
         if not devices:
             raise RuntimeError(
@@ -37,11 +40,29 @@ class RakkRGBController:
                 f"Product ID: {hex(self.PRODUCT_ID)}"
             )
 
+        # Prefer any interface whose path ends in "\\KBD"; those are the
+        # actual keyboard endpoints on Windows.  hid.enumerate() returns the
+        # path as bytes on Windows, so compare in bytes and decode for display.
+        def has_kbd_path(d):
+            p = d.get("path") or b""
+            if isinstance(p, bytes):
+                return p.endswith(b"\\KBD")
+            return str(p).endswith("\\KBD")
+
+        devices.sort(key=lambda d: 0 if has_kbd_path(d) else 1)
+
         # Try each HID interface until one accepts a color write.  This
         # heuristics helps when the correct interface isn't the keyboard
         # endpoint (many SONiX boards expose several, e.g. Col02/Col03 ...).
         device_info = None
         for d in devices:
+            raw_path = d.get("path", b"<unknown>")
+            # convert to string if bytes for logging
+            if isinstance(raw_path, bytes):
+                path = raw_path.decode(errors="ignore")
+            else:
+                path = raw_path
+            print(f"Trying interface path: {path}")
             try:
                 dev = hid.device()
                 if d.get("path"):
@@ -58,14 +79,17 @@ class RakkRGBController:
                 except Exception:
                     ret = 0
 
-                if ret:
+                print(f"  probe returned {ret}")
+                # hidapi returns positive byte count on success, 0 when nothing
+                # was written, and -1 on error.  Don't consider -1 a match!
+                if ret is not None and isinstance(ret, int) and ret > 0:
                     device_info = d
                     self.device = dev
                     break
                 else:
                     dev.close()
-            except Exception:
-                # ignore and try next
+            except Exception as e:
+                print(f"  interface open/probe failed: {e}")
                 continue
 
         # if probing failed, fall back to the first device (previous logic)
@@ -124,27 +148,30 @@ class RakkRGBController:
 
         for idx, cmd in enumerate(candidates, 1):
             data = bytes(cmd)
+
+            # try writing as an output report first
             try:
                 written = self.device.write(data)
                 print(f"DEBUG: write attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={written}")
-                    # hidapi returns -1 on error, 0 when nothing written, positive bytes
-                    if written is not None and written > 0:
+                # hidapi returns -1 on error, 0 when nothing written, positive bytes
+                if written is not None and written > 0:
                     return
-                    elif written == -1:
-                        print(f"DEBUG: write returned -1 (error) on attempt {idx}")
-                except Exception as e:
-                    print(f"DEBUG: write attempt {idx} raised {e}")
+                elif written == -1:
+                    print(f"DEBUG: write returned -1 (error) on attempt {idx}")
+            except Exception as e:
+                print(f"DEBUG: write attempt {idx} raised {e}")
 
-                # try feature report as alternative path
-                try:
-                    fed = self.device.send_feature_report(data)
-                    print(f"DEBUG: feature attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={fed}")
-                    if fed is not None and fed > 0:
-                        return
-                    elif fed == -1:
-                        print(f"DEBUG: feature report returned -1 (error) on attempt {idx}")
-                except Exception as e:
-                    print(f"DEBUG: feature attempt {idx} raised {e}")
+            # try feature report as alternative path
+            try:
+                fed = self.device.send_feature_report(data)
+                print(f"DEBUG: feature attempt {idx} len={len(cmd)} cmd={cmd[:16]}... returned={fed}")
+                if fed is not None and fed > 0:
+                    return
+                elif fed == -1:
+                    print(f"DEBUG: feature report returned -1 (error) on attempt {idx}")
+            except Exception as e:
+                print(f"DEBUG: feature attempt {idx} raised {e}")
+
         # if we reach here nothing seemed to work
         print("Warning: all color write/feature attempts returned 0 or failed")
 
@@ -215,3 +242,38 @@ class RakkRGBController:
                     time.sleep(0.1)
         except KeyboardInterrupt:
             print("Probe stopped")
+
+    def probe_control_transfers(self, r=255, g=0, b=0):
+        """Brute‑force USB control requests that might set the backlight.
+
+        Some keyboards (and apparently this one) don't accept standard HID
+        output reports; instead the official driver uses a vendor‑specific
+        control transfer.  This helper iterates over a range of
+        ``bmRequestType``/``bRequest`` values while sending a simple colour
+        payload.  Watch the keyboard and hit CTRL+C when the LEDs change.
+
+        Requires ``pyusb`` (see requirements.txt).
+        """
+        try:
+            import usb.core
+        except ImportError:
+            raise RuntimeError("pyusb required for control transfer probing")
+
+        dev = usb.core.find(idVendor=self.VENDOR_ID, idProduct=self.PRODUCT_ID)
+        if dev is None:
+            raise RuntimeError("USB device not found")
+
+        dev.set_configuration()
+        payload = [0x08, 0x01, 0x01, r, g, b, 0x00, 0x00]
+
+        print("Probing control transfers; press CTRL+C when keyboard responds")
+        try:
+            for bm in range(0x20, 0x40):
+                for br in range(0x00, 0x10):
+                    try:
+                        ret = dev.ctrl_transfer(bm, br, 0, 0, payload)
+                        print(f"ctrl bm=0x{bm:02x} req=0x{br:02x} -> {ret}")
+                    except Exception as e:
+                        print(f"ctrl bm=0x{bm:02x} req=0x{br:02x} error: {e}")
+        except KeyboardInterrupt:
+            print("Control probe stopped")
